@@ -70,6 +70,7 @@ def main():
     print(img.shape)
     print(y.shape)
 
+
 if __name__ == "__main__":
     main()
     
