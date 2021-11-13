@@ -19,12 +19,13 @@ from dad.data import *
 from dad.config import *
 
 os.makedirs("log", exist_ok=True)
+os.makedirs("log/ckpt", exist_ok=True)
 os.makedirs("log/images", exist_ok=True)
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=64, help="size of the batches")
+parser.add_argument("--batch_size", type=int, default=128, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -38,7 +39,7 @@ img_shape = (3, *IMAGE_SIZE)
 cuda = True if torch.cuda.is_available() else False
 
 # Loss functions
-adversarial_loss = torch.nn.MSELoss()
+adversarial_loss =  nn.BCEWithLogitsLoss()
 
 # Initialize generator and discriminator
 generator = Generator(NUM_ATTRIBUTE, opt.latent_dim, img_shape)
@@ -73,7 +74,7 @@ def sample_image(n_row, epoch):
     """Saves a grid of generated digits ranging from 0 to n_classes"""
     # Sample noise
     z = Variable(FloatTensor(np.random.normal(0, 1, (n_row ** 2, opt.latent_dim))))
-    labels = Variable(generate_random_attributes(n_row ** 2, FloatTensor))
+    labels = Variable(generate_random_attributes(n_row ** 2, FloatTensor, cuda))
     gen_imgs = generator(z, labels)
     save_image(gen_imgs.data, os.path.join("log", "images", f"{epoch}.png"), nrow=n_row, normalize=True)
 
@@ -85,6 +86,10 @@ def sample_image(n_row, epoch):
 for epoch in range(opt.n_epochs):
     if epoch != 0 and epoch % opt.sample_interval == 0:
         sample_image(n_row=10, epoch=epoch)
+
+        if epoch % (opt.sample_interval * 5) == 0:
+            torch.save(generator.state_dict(), f'log/ckpt/generator_{epoch}.pth')
+            torch.save(discriminator.state_dict(),  f'log/ckpt/discriminator_{epoch}.pth')
 
     for i, (imgs, labels) in enumerate(train_dataloader):
 
@@ -106,7 +111,7 @@ for epoch in range(opt.n_epochs):
 
         # Sample noise and labels as generator input
         z = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, opt.latent_dim))))
-        gen_labels = Variable(generate_random_attributes(batch_size, FloatTensor))
+        gen_labels = Variable(generate_random_attributes(batch_size, FloatTensor, cuda))
 
         # Generate a batch of images
         gen_imgs = generator(z, gen_labels)

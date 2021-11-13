@@ -21,8 +21,9 @@ class ShiftAndScale(object):
         return image * 2. - 1.
 
 
-def generate_random_attributes(batch_size, tensor_type):
-    attribs = tensor_type(torch.zeros(batch_size, NUM_ATTRIBUTE))
+def generate_random_attributes(batch_size, tensor_type, cuda):
+    zeros = torch.zeros(batch_size, NUM_ATTRIBUTE).cuda() if cuda else torch.zeros(batch_size, NUM_ATTRIBUTE)
+    attribs = tensor_type(zeros)
     num_weathers = len(ATTRIBUTE_DICT['weather'])
     num_scenes = len(ATTRIBUTE_DICT['scene'])
     first_dim = np.arange(0, batch_size)
