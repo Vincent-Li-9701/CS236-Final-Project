@@ -6,6 +6,8 @@ from PIL import Image
 from torchvision import transforms
 import matplotlib.pyplot as plt
 import numpy as np
+import copy
+import pprint
 
 from dad.config import IMAGES_PATH, LABEL_PATH, IMAGE_SIZE
 
@@ -137,6 +139,28 @@ class DrivingImageDataset(Dataset):
         plt.imshow((img.permute(1, 2, 0) + 1) / 2.)
         plt.show()
 
+    def get_attribute_statistics(self):
+        attrib_counter = copy.deepcopy(self.attributes)
+        attrib_dist = copy.deepcopy(self.attributes)
+        for category, cate_map in attrib_counter.items():
+            for subtype in cate_map.keys():
+                attrib_counter[category][subtype] = 0
+                attrib_dist[category][subtype] = 0
+
+        a = 1. / len(self)
+        for i in range(len(self)):
+            doc = self.json[i]
+            attrib_counter['weather'][doc['attributes']['weather']] += 1.
+            attrib_counter['scene'][doc['attributes']['scene']] += 1.
+            attrib_counter['timeofday'][doc['attributes']['timeofday']] += 1.
+            attrib_dist['weather'][doc['attributes']['weather']] += a
+            attrib_dist['scene'][doc['attributes']['scene']] += a
+            attrib_dist['timeofday'][doc['attributes']['timeofday']] += a
+
+        pprint.pprint(f"Dataset size: {len(self)}")
+        pprint.pprint(attrib_counter)
+        pprint.pprint(attrib_dist)
+
 
 def test_dataset():
     dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH)
@@ -158,6 +182,9 @@ def test_dataset():
 if __name__ == "__main__":
     test_dataset()
     # print(generate_random_attributes(10, torch.FloatTensor))
+
+    # dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH)
+    # dataset.get_attribute_statistics()
     
 
 

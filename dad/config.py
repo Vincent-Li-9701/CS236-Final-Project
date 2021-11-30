@@ -1,4 +1,4 @@
-IMAGE_SIZE = (168, 168)
+IMAGE_SIZE = (128, 128)
 
 
 # For Anthony
