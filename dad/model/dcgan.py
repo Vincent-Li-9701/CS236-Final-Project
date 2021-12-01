@@ -14,16 +14,15 @@ def weights_init(m):
 
 
 class DCGenerator(nn.Module):
-    def __init__(self, n_attributes, latent_dim, img_shape, ngf=64):
+    def __init__(self, n_attributes, latent_dim, n_embed=32, ngf=64):
         super(DCGenerator, self).__init__()
 
-        # self.label_emb = nn.Embedding(n_attributes, n_attributes)
-        self.img_shape = img_shape
+        self.label_embedding = nn.Linear(n_attributes, n_embed, bias=False)
 
         self.model = nn.Sequential(
             # input is Z, going into a convolution
             # state size. (ngf * 8) x 4 x 4
-            nn.ConvTranspose2d(in_channels=latent_dim + n_attributes, out_channels=ngf * 8,
+            nn.ConvTranspose2d(in_channels=latent_dim + n_embed, out_channels=ngf * 8,
                                kernel_size=4, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(ngf * 8),
             nn.LeakyReLU(0.2, inplace=True),
@@ -50,13 +49,14 @@ class DCGenerator(nn.Module):
 
     def forward(self, noise, labels):
         # Concatenate label embedding and image to produce input
-        gen_input = torch.cat((labels, noise), -1).unsqueeze(-1).unsqueeze(-1)
+        embedding = self.label_embedding(labels)
+        gen_input = torch.cat((noise, embedding), -1).unsqueeze(-1).unsqueeze(-1)
         img = self.model(gen_input)
         return img
 
 
 class DCDiscriminator(nn.Module):
-    def __init__(self, n_attributes, img_shape, n_embed=32, ndf=64):
+    def __init__(self, n_attributes, n_embed=32, ndf=64):
         super(DCDiscriminator, self).__init__()
 
         self.label_embedding = nn.Linear(n_attributes, n_embed, bias=False)

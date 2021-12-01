@@ -1,4 +1,4 @@
-import torch 
+import torch
 import os
 import json
 from torch.utils.data import Dataset
@@ -11,11 +11,14 @@ import pprint
 
 from dad.config import IMAGES_PATH, LABEL_PATH, IMAGE_SIZE
 
-NUM_ATTRIBUTE = 18
 ATTRIBUTE_DICT = {
     'weather': {'clear': 0, 'rainy': 1, 'snowy': 2, 'overcast': 3, 'partly cloudy': 4, 'foggy': 5, 'undefined': 6},
     'scene': {'city street': 7, 'highway': 8, 'residential': 9, 'parking lot': 10, 'tunnel': 11, 'gas stations': 12, 'undefined': 13},
     'timeofday': {'daytime': 14, 'dawn/dusk': 15, 'night': 16, 'undefined': 17}}
+KEY_ATTRIBUTE_DICT = {
+    'weather': {'clear': 0, 'rainy': 1, 'snowy': 2, 'cloudy': 3},
+    'scene': {'city street': 4, 'highway': 5, 'residential': 6},
+    'timeofday': {'daytime': 7, 'dawn/dusk': 8, 'night': 9}}
 
 
 class ShiftAndScale(object):
@@ -23,25 +26,17 @@ class ShiftAndScale(object):
         return image * 2. - 1.
 
 
-def generate_random_attributes(batch_size, tensor_type, cuda):
-    zeros = torch.zeros(batch_size, NUM_ATTRIBUTE).cuda() if cuda else torch.zeros(batch_size, NUM_ATTRIBUTE)
-    attribs = tensor_type(zeros)
-    num_weathers = len(ATTRIBUTE_DICT['weather'])
-    num_scenes = len(ATTRIBUTE_DICT['scene'])
-    first_dim = np.arange(0, batch_size)
-    attribs[first_dim, np.random.randint(0, num_weathers, size=batch_size)] = 1.
-    attribs[first_dim, np.random.randint(num_weathers, num_weathers + num_scenes, size=batch_size)] = 1.
-    attribs[first_dim, np.random.randint(num_weathers + num_scenes, NUM_ATTRIBUTE, size=batch_size)] = 1.
-    return attribs
-
-
 class DrivingImageDataset(Dataset):
-    def __init__(self, folder_path, split, label_path) -> None:
+    def __init__(self, folder_path, split, label_path, use_key_attribs=False) -> None:
         super().__init__()
         assert split == "train" or split == "val"
         self.split = split
+        self.attributes = KEY_ATTRIBUTE_DICT if use_key_attribs else ATTRIBUTE_DICT
         self.image_paths = os.path.join(folder_path, split)
-        self.json = self.read_label_json(label_path)
+        if use_key_attribs:
+            self.json = self.read_key_attrib_json(label_path)
+        else:
+            self.json = self.read_label_json(label_path)
 
         self.preprocess = transforms.Compose([
                 transforms.Resize(IMAGE_SIZE),
@@ -51,8 +46,38 @@ class DrivingImageDataset(Dataset):
                 ShiftAndScale()
             ])
 
-        self.attributes = ATTRIBUTE_DICT
-        # self.attributes = self.collect_all_attributes()
+    def get_num_attribs(self):
+        num = 0
+        for key in ["weather", "scene", "timeofday"]:
+            for clss, idx in self.attributes[key].items():
+                num += 1
+        return num
+
+    def read_key_attrib_json(self, label_path):
+        key_attrib_file = os.path.join(label_path,
+                                  f"bdd100k_labels_images_{self.split}_small_key.json")
+        if not os.path.exists(key_attrib_file):
+            json_data = self.read_label_json(label_path)
+            key_attrib_data = []
+            for data in json_data:
+                attribs = data["attributes"]
+                # weather
+                if attribs["weather"] == "partly cloudy" or attribs["weather"] == "overcast":
+                    attribs["weather"] = "cloudy"
+                if attribs["weather"] not in self.attributes["weather"]:
+                    continue
+                if attribs["scene"] not in self.attributes["scene"]:
+                    continue
+                if attribs["timeofday"] not in self.attributes["timeofday"]:
+                    continue
+                key_attrib_data.append({"name": data["name"],
+                                        "attributes": attribs})
+            with open(key_attrib_file, 'w') as f:
+                json.dump(key_attrib_data, f, indent=4)
+        else:
+            key_attrib_data = json.load(open(key_attrib_file))
+        return key_attrib_data
+
 
     def read_label_json(self, label_path):
         small_label_file = os.path.join(label_path,
@@ -60,22 +85,17 @@ class DrivingImageDataset(Dataset):
         if not os.path.exists(small_label_file):
             label_file = os.path.join(label_path,
                                       f"bdd100k_labels_images_{self.split}.json")
-            json_data = self.read_json(label_file)
+            json_data = []
+            f = json.load(open(label_file))
+            for data in f:
+                json_data.append({"name": data["name"],
+                                  "attributes": data["attributes"]})
             with open(small_label_file, 'w') as f:
                 json.dump(json_data, f, indent=4)
         else:
-            json_data = self.read_json(small_label_file)
+            json_data = json.load(open(small_label_file))
         return json_data
 
-    def read_json(self, json_file):
-        print(f"Reading JSON label file: {json_file}")
-        json_data = []
-        f = json.load(open(json_file))
-        for data in f:
-            json_data.append({"name": data["name"],
-                              "attributes": data["attributes"]})
-        return json_data
-    
     def collect_all_attributes(self):
         attributes = {}
         count = 0
@@ -95,7 +115,7 @@ class DrivingImageDataset(Dataset):
             if doc['attributes']['timeofday'] not in attributes['timeofday']:
                 attributes['timeofday'][doc['attributes']['timeofday']] = count
                 count += 1
-        
+
         return attributes
 
     def __len__(self):
@@ -107,12 +127,12 @@ class DrivingImageDataset(Dataset):
         image = self.preprocess(image)
         doc = self.json[idx]
 
-        y = torch.zeros(NUM_ATTRIBUTE)
+        y = torch.zeros(self.get_num_attribs())
 
         y[self.attributes['weather'][doc['attributes']['weather']]] = 1
         y[self.attributes['scene'][doc['attributes']['scene']]] = 1
         y[self.attributes['timeofday'][doc['attributes']['timeofday']]] = 1
-        
+
         return image, y
 
     def translate_labels(self, y):
@@ -161,9 +181,40 @@ class DrivingImageDataset(Dataset):
         pprint.pprint(attrib_counter)
         pprint.pprint(attrib_dist)
 
+    def generate_random_attributes(self, batch_size, tensor_type, cuda):
+        num_attributes = self.get_num_attribs()
+        zeros = torch.zeros(batch_size, num_attributes).cuda() if cuda else torch.zeros(batch_size, num_attributes)
+        attribs = tensor_type(zeros)
+        num_weathers = len(self.attributes['weather'])
+        num_scenes = len(self.attributes['scene'])
+        first_dim = np.arange(0, batch_size)
+        attribs[first_dim, np.random.randint(0, num_weathers, size=batch_size)] = 1.
+        attribs[first_dim, np.random.randint(num_weathers, num_weathers + num_scenes, size=batch_size)] = 1.
+        attribs[first_dim, np.random.randint(num_weathers + num_scenes, num_attributes, size=batch_size)] = 1.
+        return attribs
+
+    def generate_attributes_for_plotting(self, n_row, tensor_type, cuda):
+        num_weathers = len(self.attributes['weather'])
+        num_scenes = len(self.attributes['scene'])
+        num_attributes = self.get_num_attribs()
+        zeros = torch.zeros(num_attributes * n_row, num_attributes).cuda() if cuda else torch.zeros(num_attributes * n_row, num_attributes)
+        attribs = tensor_type(zeros)
+
+        for i in range(num_attributes):
+            first_dim = np.arange(n_row * i, n_row * (i+1))
+            attribs[first_dim, i] = 1.
+
+            if i >= num_weathers:
+                attribs[first_dim, np.random.randint(0, num_weathers, size=n_row)] = 1.
+            if i < num_weathers or i >= num_weathers + num_scenes:
+                attribs[first_dim, np.random.randint(num_weathers, num_weathers + num_scenes, size=n_row)] = 1.
+            if i < num_weathers + num_scenes:
+                attribs[first_dim, np.random.randint(num_weathers + num_scenes, num_attributes, size=n_row)] = 1.
+        return attribs
+
 
 def test_dataset():
-    dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH)
+    dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH, use_key_attribs=True)
     print(f"Dataset size: {len(dataset)}")
     print(dataset.attributes)
     img, y = dataset.__getitem__(0)
@@ -172,21 +223,24 @@ def test_dataset():
 
     # test pixel value range
     print(f"pixel value: max {torch.max(img)} min {torch.min(img)}")
-    print(img)
+    # print(img)
     print(y)
     dataset.plot_img(0)
     dataset.plot_img(1)
     dataset.plot_img(2)
 
 
+def test_generate_attributes():
+    dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH, use_key_attribs=True)
+    print(dataset.generate_random_attributes(5, torch.FloatTensor, False))
+    print()
+    print(dataset.generate_attributes_for_plotting(2, torch.FloatTensor, False))
+
+
 if __name__ == "__main__":
-    test_dataset()
+    # test_dataset()
+    test_generate_attributes()
     # print(generate_random_attributes(10, torch.FloatTensor))
 
-    # dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH)
-    # dataset.get_attribute_statistics()
-    
-
-
-
-
+    dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH, use_key_attribs=True)
+    dataset.get_attribute_statistics()

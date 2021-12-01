@@ -42,16 +42,26 @@ img_shape = (3, *IMAGE_SIZE)
 
 cuda = True if torch.cuda.is_available() else False
 
+
+# Configure data loader
+train_dataset = data.DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH, use_key_attribs=True)
+train_dataloader = torch.utils.data.DataLoader(
+    train_dataset,
+    batch_size=opt.batch_size,
+    shuffle=True,
+)
+num_attributes = train_dataset.get_num_attribs()
+
 # Loss functions
 adversarial_loss = nn.BCELoss()
 
 # Initialize generator and discriminator
 # cGAN
-# generator = Generator(NUM_ATTRIBUTE, opt.latent_dim, img_shape)
-# discriminator = Discriminator(NUM_ATTRIBUTE, img_shape)
+# generator = Generator(num_attributes, opt.latent_dim, img_shape)
+# discriminator = Discriminator(num_attributes, img_shape)
 # cDCGAN
-generator = DCGenerator(NUM_ATTRIBUTE, opt.latent_dim, img_shape)
-discriminator = DCDiscriminator(NUM_ATTRIBUTE, img_shape)
+generator = DCGenerator(num_attributes, opt.latent_dim)
+discriminator = DCDiscriminator(num_attributes)
 generator.apply(weights_init)
 discriminator.apply(weights_init)
 
@@ -61,18 +71,6 @@ if cuda:
     discriminator.cuda()
     adversarial_loss.cuda()
     device = 'cuda'
-
-# Configure data loader
-train_dataloader = torch.utils.data.DataLoader(
-    data.DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH),
-    batch_size=opt.batch_size,
-    shuffle=True,
-)
-# val_dataloader = torch.utils.data.DataLoader(
-#     data.DrivingImageDataset(folder_path=IMAGES_PATH, split='val', label_path=LABEL_PATH),
-#     batch_size=opt.batch_size,
-#     shuffle=True,
-# )
 
 # Optimizers
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -89,8 +87,8 @@ writer = SummaryWriter(f'{this_run_path}/run')
 def sample_image(n_row, epoch):
     """Saves a grid of generated digits ranging from 0 to n_classes"""
     # Sample noise
-    z = Variable(torch.randn(n_row ** 2, opt.latent_dim, device=device))
-    labels = Variable(generate_random_attributes(n_row ** 2, FloatTensor, cuda))
+    z = Variable(torch.randn(n_row * train_dataset.get_num_attribs(), opt.latent_dim, device=device))
+    labels = Variable(train_dataset.generate_attributes_for_plotting(n_row, FloatTensor, cuda))
     gen_imgs = generator(z, labels)
     save_image(gen_imgs.data, f"{this_run_path}/images/epoch{epoch}.png", nrow=n_row, normalize=True)
 
@@ -100,13 +98,6 @@ def sample_image(n_row, epoch):
 # ----------
 
 for epoch in range(opt.n_epochs):
-    if epoch != 0 and epoch % opt.sample_interval == 0:
-        sample_image(n_row=8, epoch=epoch)
-
-    if epoch != 0 and epoch % opt.ckpt_interval == 0:
-        torch.save(generator.state_dict(), f'{this_run_path}/ckpt/generator_{epoch}.pth')
-        torch.save(discriminator.state_dict(), f'{this_run_path}/ckpt/discriminator_{epoch}.pth')
-
     for i, (imgs, labels) in enumerate(train_dataloader):
 
         batch_size = imgs.shape[0]
@@ -127,7 +118,7 @@ for epoch in range(opt.n_epochs):
 
         # Sample noise and labels as generator input
         z = Variable(torch.randn(batch_size, opt.latent_dim, device=device))
-        gen_labels = Variable(generate_random_attributes(batch_size, FloatTensor, cuda))
+        gen_labels = Variable(train_dataset.generate_random_attributes(batch_size, FloatTensor, cuda))
 
         # Generate a batch of images
         gen_imgs = generator(z, gen_labels)
@@ -173,3 +164,10 @@ for epoch in range(opt.n_epochs):
         writer.add_scalar('G loss', g_loss.item(), epoch * len(train_dataloader) + i)
         writer.add_scalar('D(x)', D_x, epoch * len(train_dataloader) + i)
         writer.add_scalar('D(G(z))', D_G_z, epoch * len(train_dataloader) + i)
+
+    if epoch % opt.sample_interval == 0:
+        sample_image(n_row=8, epoch=epoch)
+
+    if epoch % opt.ckpt_interval == 0:
+        torch.save(generator.state_dict(), f'{this_run_path}/ckpt/generator_{epoch}.pth')
+        torch.save(discriminator.state_dict(), f'{this_run_path}/ckpt/discriminator_{epoch}.pth')
