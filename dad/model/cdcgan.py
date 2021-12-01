@@ -13,14 +13,16 @@ def weights_init(m):
         nn.init.constant_(m.bias.data, 0)
 
 
-class DCGenerator(nn.Module):
-    def __init__(self, latent_dim, ngf=64):
-        super(DCGenerator, self).__init__()
+class cDCGenerator(nn.Module):
+    def __init__(self, n_attributes, latent_dim, n_embed=32, ngf=64):
+        super(cDCGenerator, self).__init__()
+
+        self.label_embedding = nn.Linear(n_attributes, n_embed, bias=False)
 
         self.model = nn.Sequential(
             # input is Z, going into a convolution
             # state size. (ngf * 8) x 4 x 4
-            nn.ConvTranspose2d(in_channels=latent_dim, out_channels=ngf * 8,
+            nn.ConvTranspose2d(in_channels=latent_dim + n_embed, out_channels=ngf * 8,
                                kernel_size=4, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(ngf * 8),
             nn.LeakyReLU(0.2, inplace=True),
@@ -45,9 +47,11 @@ class DCGenerator(nn.Module):
             nn.Tanh()
         )
 
-    def forward(self, noise):
+    def forward(self, noise, labels):
         # Concatenate label embedding and image to produce input
-        img = self.model(noise)
+        embedding = self.label_embedding(labels)
+        gen_input = torch.cat((noise, embedding), -1).unsqueeze(-1).unsqueeze(-1)
+        img = self.model(gen_input)
         return img
 
     def get_first_layer_gradnorm(self):
@@ -57,9 +61,11 @@ class DCGenerator(nn.Module):
         return self.model[-2].weight.grad.detach().data.norm(2).item()
 
 
-class DCDiscriminator(nn.Module):
-    def __init__(self, ndf=64):
-        super(DCDiscriminator, self).__init__()
+class cDCDiscriminator(nn.Module):
+    def __init__(self, n_attributes, n_embed=32, ndf=64):
+        super(cDCDiscriminator, self).__init__()
+
+        self.label_embedding = nn.Linear(n_attributes, n_embed, bias=False)
 
         self.first_layer = nn.Sequential(
             # input is (3) x 64 x 64
@@ -70,7 +76,7 @@ class DCDiscriminator(nn.Module):
 
         self.model = nn.Sequential(
             # state size. (ndf + n_attribs) x 32 x 32
-            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.Conv2d(ndf + n_embed, ndf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 2),
             nn.Dropout(0.5),
             nn.LeakyReLU(0.2, inplace=True),
@@ -90,8 +96,12 @@ class DCDiscriminator(nn.Module):
             # state size. (ndf*8) x 1 x 1
         )
 
-    def forward(self, img):
+    def forward(self, img, labels):
         x = self.first_layer(img)
+        embedding = self.label_embedding(labels)
+        # tile labels so that it has the same shape as the output of first conv layer
+        tiled_embeds = torch.tile(embedding.unsqueeze(-1).unsqueeze(-1), (1, 1, 32, 32))
+        x = torch.cat((x, tiled_embeds), dim=1)
         validity = self.model(x)[:, :, 0, 0]
         return validity
 
