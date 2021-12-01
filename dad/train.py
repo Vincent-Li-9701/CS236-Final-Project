@@ -27,15 +27,16 @@ parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first 
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")
 parser.add_argument("--sample_interval", type=int, default=1, help="interval between image sampling")
-parser.add_argument("--ckpt_interval", type=int, default=5, help="interval between checkpoint saving")
+parser.add_argument("--ckpt_interval", type=int, default=1, help="interval between checkpoint saving")
 parser.add_argument("--save_name", type=str, default='milestone', help="name used to save this experie=ments")
 opt = parser.parse_args()
 print(opt)
 
-os.makedirs("log", exist_ok=True)
-os.makedirs(f"log/{opt.save_name}", exist_ok=True)
-os.makedirs(f"log/{opt.save_name}/ckpt", exist_ok=True)
-os.makedirs(f"log/{opt.save_name}/images", exist_ok=True)
+os.makedirs(LOG_PATH, exist_ok=True)
+this_run_path = os.path.join(LOG_PATH, opt.save_name)
+os.makedirs(this_run_path, exist_ok=True)
+os.makedirs(os.path.join(this_run_path, "ckpt"), exist_ok=True)
+os.makedirs(os.path.join(this_run_path, "images"), exist_ok=True)
 
 img_shape = (3, *IMAGE_SIZE)
 
@@ -51,11 +52,15 @@ adversarial_loss = nn.BCELoss()
 # cDCGAN
 generator = DCGenerator(NUM_ATTRIBUTE, opt.latent_dim, img_shape)
 discriminator = DCDiscriminator(NUM_ATTRIBUTE, img_shape)
+generator.apply(weights_init)
+discriminator.apply(weights_init)
+
 
 if cuda:
     generator.cuda()
     discriminator.cuda()
     adversarial_loss.cuda()
+    device = 'cuda'
 
 # Configure data loader
 train_dataloader = torch.utils.data.DataLoader(
@@ -78,16 +83,16 @@ LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 
 
 # Logging
-writer = SummaryWriter(f'log/{opt.save_name}/run')
+writer = SummaryWriter(f'{this_run_path}/run')
 
 
 def sample_image(n_row, epoch):
     """Saves a grid of generated digits ranging from 0 to n_classes"""
     # Sample noise
-    z = Variable(FloatTensor(np.random.normal(0, 1, (n_row ** 2, opt.latent_dim))))
+    z = Variable(torch.randn(n_row ** 2, opt.latent_dim, device=device))
     labels = Variable(generate_random_attributes(n_row ** 2, FloatTensor, cuda))
     gen_imgs = generator(z, labels)
-    save_image(gen_imgs.data, os.path.join("log", "images", f"{epoch}.png"), nrow=n_row, normalize=True)
+    save_image(gen_imgs.data, f"{this_run_path}/images/epoch{epoch}.png", nrow=n_row, normalize=True)
 
 
 # ----------
@@ -96,19 +101,19 @@ def sample_image(n_row, epoch):
 
 for epoch in range(opt.n_epochs):
     if epoch != 0 and epoch % opt.sample_interval == 0:
-        sample_image(n_row=10, epoch=epoch)
+        sample_image(n_row=8, epoch=epoch)
 
     if epoch != 0 and epoch % opt.ckpt_interval == 0:
-        torch.save(generator.state_dict(), f'log/{opt.save_name}/ckpt/generator_{epoch}.pth')
-        torch.save(discriminator.state_dict(),  f'log/{opt.save_name}/ckpt/discriminator_{epoch}.pth')
+        torch.save(generator.state_dict(), f'{this_run_path}/ckpt/generator_{epoch}.pth')
+        torch.save(discriminator.state_dict(), f'{this_run_path}/ckpt/discriminator_{epoch}.pth')
 
     for i, (imgs, labels) in enumerate(train_dataloader):
 
         batch_size = imgs.shape[0]
 
-        # Adversarial ground truths
-        valid = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
-        fake = Variable(FloatTensor(batch_size, 1).fill_(0.0), requires_grad=False)
+        # Adversarial ground truths with label smoothing
+        valid = Variable(torch.rand(batch_size, 1, device=device) * 0.5 + 0.7, requires_grad=False)
+        fake = Variable(torch.rand(batch_size, 1, device=device) * 0.3, requires_grad=False)
 
         # Configure input
         real_imgs = Variable(imgs.type(FloatTensor))
@@ -121,7 +126,7 @@ for epoch in range(opt.n_epochs):
         optimizer_G.zero_grad()
 
         # Sample noise and labels as generator input
-        z = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, opt.latent_dim))))
+        z = Variable(torch.randn(batch_size, opt.latent_dim, device=device))
         gen_labels = Variable(generate_random_attributes(batch_size, FloatTensor, cuda))
 
         # Generate a batch of images
@@ -168,4 +173,3 @@ for epoch in range(opt.n_epochs):
         writer.add_scalar('G loss', g_loss.item(), epoch * len(train_dataloader) + i)
         writer.add_scalar('D(x)', D_x, epoch * len(train_dataloader) + i)
         writer.add_scalar('D(G(z))', D_G_z, epoch * len(train_dataloader) + i)
-
