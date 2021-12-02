@@ -18,7 +18,6 @@ from torch.utils.tensorboard import SummaryWriter
 from dad.model import *
 from dad.data import *
 from dad.config import *
-from dad.utils import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=100, help="number of epochs of training")
@@ -35,7 +34,7 @@ opt = parser.parse_args()
 print(opt)
 
 # tricks to confuse the discriminator
-FLIP_LABEL = True
+FLIP_LABEL = False
 ADD_NOISE = True
 
 os.makedirs(LOG_PATH, exist_ok=True)
@@ -64,12 +63,12 @@ adversarial_loss = nn.BCELoss()
 # Initialize generator and discriminator
 # cGAN
 # generator = Generator(num_attributes, opt.latent_dim, img_shape)
-# discriminator = Discriminator(num_attributes, img_shape)
+discriminator = Discriminator(num_attributes, img_shape)
 # cDCGAN
 generator = cDCGenerator(num_attributes, opt.latent_dim)
-discriminator = cDCDiscriminator(num_attributes)
 generator.apply(weights_init)
-discriminator.apply(weights_init)
+# discriminator = cDCDiscriminator(num_attributes)
+# discriminator.apply(weights_init)
 
 
 if cuda:

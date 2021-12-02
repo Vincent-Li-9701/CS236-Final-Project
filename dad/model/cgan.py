@@ -19,7 +19,7 @@ class Generator(nn.Module):
             return layers
 
         self.model = nn.Sequential(
-            *block(latent_dim + n_attributes, 128, normalize=False),
+            *block(latent_dim + n_embed, 128, normalize=False),
             *block(128, 256),
             *block(256, 512),
             *block(512, 1024),
@@ -35,6 +35,12 @@ class Generator(nn.Module):
         img = img.view(img.size(0), *self.img_shape)
         return img
 
+    def get_first_layer_gradnorm(self):
+        return self.model[0].weight.grad.detach().data.norm(2).item()
+
+    def get_last_layer_gradnorm(self):
+        return self.model[-2].weight.grad.detach().data.norm(2).item()
+
 
 class Discriminator(nn.Module):
     def __init__(self, n_attributes, img_shape, n_embed=32):
@@ -43,7 +49,7 @@ class Discriminator(nn.Module):
         self.label_embedding = nn.Linear(n_attributes, n_embed, bias=False)
 
         self.model = nn.Sequential(
-            nn.Linear(n_attributes + int(np.prod(img_shape)), 512),
+            nn.Linear(n_embed + int(np.prod(img_shape)), 512),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(512, 512),
             nn.Dropout(0.4),
@@ -61,3 +67,9 @@ class Discriminator(nn.Module):
         d_in = torch.cat((img.view(img.size(0), -1), embedding), -1)
         validity = self.model(d_in)
         return validity
+
+    def get_first_layer_gradnorm(self):
+        return self.model[0].weight.grad.detach().data.norm(2).item()
+
+    def get_last_layer_gradnorm(self):
+        return self.model[-2].weight.grad.detach().data.norm(2).item()
