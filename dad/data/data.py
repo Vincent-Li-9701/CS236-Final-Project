@@ -27,7 +27,7 @@ class ShiftAndScale(object):
 
 
 class DrivingImageDataset(Dataset):
-    def __init__(self, folder_path, split, label_path, use_key_attribs=False) -> None:
+    def __init__(self, folder_path, split, label_path, use_key_attribs=True) -> None:
         super().__init__()
         assert split == "train" or split == "val"
         self.split = split
@@ -212,6 +212,14 @@ class DrivingImageDataset(Dataset):
                 attribs[first_dim, np.random.randint(num_weathers + num_scenes, num_attributes, size=n_row)] = 1.
         return attribs
 
+    def generate_attribute(self, weather, scene, timeofday, cuda):
+        num_attributes = self.get_num_attribs()
+        attrib = torch.zeros(1, num_attributes).cuda() if cuda else torch.zeros(1, num_attributes)
+        attrib[:, self.attributes['weather'][weather]] = 1.
+        attrib[:, self.attributes['scene'][scene]] = 1.
+        attrib[:, self.attributes['timeofday'][timeofday]] = 1.
+        return attrib
+
 
 def test_dataset():
     dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH, use_key_attribs=True)
@@ -239,7 +247,7 @@ def test_generate_attributes():
 
 if __name__ == "__main__":
     # test_dataset()
-    test_generate_attributes()
+    # test_generate_attributes()
     # print(generate_random_attributes(10, torch.FloatTensor))
 
     dataset = DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH, use_key_attribs=True)

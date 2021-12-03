@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-
+import dad
 from dad.model import *
 from dad.data import *
 from dad.config import *
@@ -26,7 +26,8 @@ parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rat
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")
-parser.add_argument("--flip_label_interval", type=int, default=10, help="interval between label_fliping")
+parser.add_argument("--flip_label_interval", type=int, default=5, help="interval between label_fliping")
+parser.add_argument("--skip_D_interval", type=int, default=1, help="interval between training Discriminator")
 parser.add_argument("--sample_interval", type=int, default=1, help="interval between image sampling")
 parser.add_argument("--ckpt_interval", type=int, default=1, help="interval between checkpoint saving")
 parser.add_argument("--save_name", type=str, default='milestone', help="name used to save this experie=ments")
@@ -34,7 +35,7 @@ opt = parser.parse_args()
 print(opt)
 
 # tricks to confuse the discriminator
-FLIP_LABEL = False
+FLIP_LABEL = True
 ADD_NOISE = True
 
 os.makedirs(LOG_PATH, exist_ok=True)
@@ -46,6 +47,7 @@ os.makedirs(os.path.join(this_run_path, "images"), exist_ok=True)
 img_shape = (3, *IMAGE_SIZE)
 
 cuda = True if torch.cuda.is_available() else False
+device = 'cuda' if cuda else 'cpu'
 
 
 # Configure data loader
@@ -63,19 +65,19 @@ adversarial_loss = nn.BCELoss()
 # Initialize generator and discriminator
 # cGAN
 # generator = Generator(num_attributes, opt.latent_dim, img_shape)
-discriminator = Discriminator(num_attributes, img_shape)
+# discriminator = Discriminator(num_attributes, img_shape)
 # cDCGAN
-generator = cDCGenerator(num_attributes, opt.latent_dim)
+import dad.model.gan
+generator = dad.model.gan.DCGenerator(num_attributes, opt.latent_dim)
 generator.apply(weights_init)
-# discriminator = cDCDiscriminator(num_attributes)
-# discriminator.apply(weights_init)
+discriminator = dad.model.gan.DCDiscriminator(num_attributes)
+discriminator.apply(weights_init)
 
 
 if cuda:
     generator.cuda()
     discriminator.cuda()
     adversarial_loss.cuda()
-    device = 'cuda'
 
 # Optimizers
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -103,19 +105,21 @@ def sample_image(n_row, epoch, iteration):
 
 for epoch in range(opt.n_epochs):
     for i, (imgs, labels) in enumerate(train_dataloader):
+        if epoch % opt.sample_interval == 0 and (i + 1) % 100 == 0:
+            sample_image(n_row=8, epoch=epoch, iteration=i+1)
 
         batch_size = imgs.shape[0]
 
         # Adversarial ground truths with label smoothing
         # Flip labels
         valid = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
+        # Use Soft labels
+        soft_valid = Variable(torch.rand(batch_size, 1, device=device) * 0.3 + 0.7, requires_grad=False)
+        soft_fake = Variable(torch.rand(batch_size, 1, device=device) * 0.3, requires_grad=False)
 
         # Configure input
         real_imgs = Variable(imgs.type(FloatTensor))
         labels = Variable(labels.type(FloatTensor))
-        # Add Gaussian noise to real
-        if ADD_NOISE:
-            real_imgs += torch.randn(*real_imgs.size(), device=device) * 0.1
 
         # -----------------
         #  Train Generator
@@ -143,13 +147,20 @@ for epoch in range(opt.n_epochs):
         #  Train Discriminator
         # ---------------------
 
-        # Use Soft labels
+        if i % opt.skip_D_interval != 0:
+            continue
+
+        # Add Gaussian noise
+        gen_imgs_detached = gen_imgs.detach()
+        if ADD_NOISE:
+            disminishing = max((10. - epoch) / 10., 0.)
+            noise = torch.randn(*real_imgs.size(), device=device) * 0.1 * disminishing
+            real_imgs += noise
+            gen_imgs_detached += noise
+
         if FLIP_LABEL and i % opt.flip_label_interval == 0:    # Label fliping
             soft_fake = Variable(torch.rand(batch_size, 1, device=device) * 0.3 + 0.7, requires_grad=False)
             soft_valid = Variable(torch.rand(batch_size, 1, device=device) * 0.3, requires_grad=False)
-        else:
-            soft_valid = Variable(torch.rand(batch_size, 1, device=device) * 0.3 + 0.7, requires_grad=False)
-            soft_fake = Variable(torch.rand(batch_size, 1, device=device) * 0.3, requires_grad=False)
 
         optimizer_D.zero_grad()
 
@@ -162,7 +173,7 @@ for epoch in range(opt.n_epochs):
         #     gen_imgs_new = generator(z, gen_labels)
 
         # Loss for fake images
-        validity_fake = discriminator(gen_imgs.detach(), gen_labels)
+        validity_fake = discriminator(gen_imgs_detached, gen_labels)
         d_fake_loss = adversarial_loss(validity_fake, soft_fake)
 
         # Total discriminator loss
@@ -186,10 +197,8 @@ for epoch in range(opt.n_epochs):
         writer.add_scalar('G grad first', G_grad_first, epoch * len(train_dataloader) + i)
         writer.add_scalar('G grad last', G_grad_last, epoch * len(train_dataloader) + i)
         writer.add_scalar('D grad first', D_grad_first, epoch * len(train_dataloader) + i)
-        writer.add_scalar('D grad last', D_grad_last, epoch * len(train_dataloader) + i)
+        writer.add_scalar('D grad last', D_grad_last, epoch  * len(train_dataloader) + i)
 
-        if epoch % opt.sample_interval == 0 and (i + 1) % 100 == 0:
-            sample_image(n_row=8, epoch=epoch, iteration=i+1)
 
     if epoch % opt.ckpt_interval == 0:
         torch.save(generator.state_dict(), f'{this_run_path}/ckpt/generator_{epoch}.pth')
