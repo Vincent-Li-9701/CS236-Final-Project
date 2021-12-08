@@ -73,6 +73,39 @@ def generate_Dc_Gdc(cuda=True):
     prepare_model_datasets(generator, dataset, "/home/anthony/eval/Dc_Gdc/", "/home/anthony/eval/real/eval_data.json", cuda=cuda)
 
 
+def generate_dcgan(cuda=True):
+    from dad.model.gan import DCGenerator, DCDiscriminator
+    dataset = data.DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH, use_key_attribs=True)
+    num_attributes = dataset.get_num_attribs()
+
+    epoch = 99
+    model_path = os.path.join(LOG_PATH, "all_gan", "ckpt", f"generator_{epoch}.pth")
+
+    generator = DCGenerator(num_attributes, 100)
+    generator.load_state_dict(torch.load(model_path))
+    if cuda:
+        generator.cuda()
+    generator.eval()
+    prepare_model_datasets(generator, dataset, "/home/anthony/eval/dcgan/", "/home/anthony/eval/real/eval_data.json", cuda=cuda)
+
+
+def generate_acgan(cuda=True):
+    from dad.model.acgan import ACGenerator, ACDiscriminator
+    dataset = data.DrivingImageDataset(folder_path=IMAGES_PATH, split='train', label_path=LABEL_PATH, use_key_attribs=True)
+    num_attributes = dataset.get_num_attribs()
+
+    epoch = 99
+    model_path = os.path.join(LOG_PATH, "acgan", "ckpt", f"generator_{epoch}.pth")
+
+    generator = ACGenerator(num_attributes, 100)
+    generator.load_state_dict(torch.load(model_path))
+    if cuda:
+        generator.cuda()
+    generator.eval()
+    prepare_model_datasets(generator, dataset, "/home/anthony/eval/acgan/", "/home/anthony/eval/real/eval_data.json", cuda=cuda)
+
 
 # prepare_real_datasets("/home/anthony/eval/real2/", 2048, offset=2048)
-generate_Dc_Gdc()
+# generate_Dc_Gdc()
+# generate_dcgan()
+generate_acgan()

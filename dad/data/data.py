@@ -78,7 +78,6 @@ class DrivingImageDataset(Dataset):
             key_attrib_data = json.load(open(key_attrib_file))
         return key_attrib_data
 
-
     def read_label_json(self, label_path):
         small_label_file = os.path.join(label_path,
                                   f"bdd100k_labels_images_{self.split}_small.json")
@@ -219,6 +218,17 @@ class DrivingImageDataset(Dataset):
         attrib[:, self.attributes['scene'][scene]] = 1.
         attrib[:, self.attributes['timeofday'][timeofday]] = 1.
         return attrib
+
+    def separate_label(self, label):
+        w_len = len(self.attributes['weather'])
+        s_len = len(self.attributes['scene'])
+        weather = label[:, :w_len]
+        scene = label[:, w_len:w_len+s_len]
+        time = label[:, w_len+s_len:]
+        weather_label = torch.argmax(weather, dim=1)
+        scene_label = torch.argmax(scene, dim=1)
+        time_label = torch.argmax(time, dim=1)
+        return weather_label, scene_label, time_label
 
 
 def test_dataset():
